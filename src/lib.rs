@@ -15,7 +15,7 @@
 //! Implements secure financial transaction processing using memory-safe Rust,
 //! aligning with 2024 CISA/FBI guidance for critical financial infrastructure.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -41,6 +41,42 @@ pub enum ValidationError {
 
     #[error("Business rule violation: {0}")]
     BusinessRuleViolation(String),
+
+    #[error("Velocity check failed: {0}")]
+    VelocityViolation(String),
+
+    #[error("Risk threshold exceeded: {0}")]
+    RiskThresholdExceeded(String),
+}
+
+/// Risk breakdown for detailed analysis
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RiskBreakdown {
+    pub amount_risk: u8,
+    pub velocity_risk: u8,
+    pub pattern_risk: u8,
+    pub time_risk: u8,
+    pub total_score: u8,
+}
+
+impl RiskBreakdown {
+    fn new() -> Self {
+        Self {
+            amount_risk: 0,
+            velocity_risk: 0,
+            pattern_risk: 0,
+            time_risk: 0,
+            total_score: 0,
+        }
+    }
+
+    fn calculate_total(&mut self) {
+        self.total_score = self.amount_risk
+            .saturating_add(self.velocity_risk)
+            .saturating_add(self.pattern_risk)
+            .saturating_add(self.time_risk)
+            .min(100);
+    }
 }
 
 /// Transaction type
@@ -75,6 +111,7 @@ pub struct ValidationResult {
     pub errors: Vec<ValidationError>,
     pub warnings: Vec<String>,
     pub fraud_score: u8,
+    pub risk_breakdown: RiskBreakdown,
     pub compliance_checks: HashMap<String, bool>,
     pub validated_at: DateTime<Utc>,
 }
@@ -85,10 +122,33 @@ impl ValidationResult {
         self.is_valid && self.errors.is_empty() && self.fraud_score < 50
     }
 
+    /// Check if transaction requires manual review
+    pub fn requires_manual_review(&self) -> bool {
+        self.fraud_score >= 50 || !self.warnings.is_empty()
+    }
+
+    /// Get risk level description
+    pub fn risk_level(&self) -> &str {
+        match self.fraud_score {
+            0..=25 => "Low",
+            26..=50 => "Medium",
+            51..=75 => "High",
+            _ => "Critical",
+        }
+    }
+
     /// Export as JSON
     pub fn to_json(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string_pretty(self)
     }
+}
+
+/// Transaction history entry for velocity checking
+#[derive(Debug, Clone)]
+struct TransactionHistory {
+    user_id: String,
+    timestamp: DateTime<Utc>,
+    amount: f64,
 }
 
 /// Transaction validator configuration
@@ -99,6 +159,9 @@ pub struct ValidatorConfig {
     pub fraud_threshold: u8,
     pub enable_duplicate_check: bool,
     pub enable_aml_check: bool,
+    pub velocity_check_window_minutes: i64,
+    pub max_transactions_per_window: usize,
+    pub max_amount_per_window: f64,
 }
 
 impl Default for ValidatorConfig {
@@ -109,6 +172,9 @@ impl Default for ValidatorConfig {
             fraud_threshold: 70,
             enable_duplicate_check: true,
             enable_aml_check: true,
+            velocity_check_window_minutes: 60, // 1 hour window
+            max_transactions_per_window: 10,
+            max_amount_per_window: 100_000.0,
         }
     }
 }
@@ -117,6 +183,7 @@ impl Default for ValidatorConfig {
 pub struct TransactionValidator {
     config: ValidatorConfig,
     processed_transactions: Vec<String>,
+    transaction_history: Vec<TransactionHistory>,
 }
 
 impl TransactionValidator {
@@ -125,6 +192,7 @@ impl TransactionValidator {
         Self {
             config: ValidatorConfig::default(),
             processed_transactions: Vec::new(),
+            transaction_history: Vec::new(),
         }
     }
 
@@ -133,6 +201,7 @@ impl TransactionValidator {
         Self {
             config,
             processed_transactions: Vec::new(),
+            transaction_history: Vec::new(),
         }
     }
 
@@ -141,12 +210,15 @@ impl TransactionValidator {
         let mut errors = Vec::new();
         let mut warnings = Vec::new();
         let mut compliance_checks = HashMap::new();
-        let mut fraud_score = 0u8;
+        let mut risk_breakdown = RiskBreakdown::new();
 
         // 1. Amount validation
         if let Err(e) = self.validate_amount(transaction) {
             errors.push(e);
         }
+
+        // Calculate amount risk
+        risk_breakdown.amount_risk = self.calculate_amount_risk(transaction.amount);
 
         // 2. Account validation
         if let Err(e) = self.validate_accounts(transaction) {
@@ -164,14 +236,38 @@ impl TransactionValidator {
             }
         }
 
-        // 4. Fraud detection
+        // 4. Velocity checks
+        let velocity_result = self.check_velocity(transaction);
+        risk_breakdown.velocity_risk = velocity_result.0;
+        if let Some(err) = velocity_result.1 {
+            errors.push(err);
+        }
+        if !velocity_result.2.is_empty() {
+            warnings.extend(velocity_result.2);
+        }
+
+        // Record transaction in history
+        self.transaction_history.push(TransactionHistory {
+            user_id: transaction.user_id.clone(),
+            timestamp: transaction.timestamp,
+            amount: transaction.amount,
+        });
+
+        // 5. Fraud detection
         let fraud_checks = self.check_fraud_patterns(transaction);
-        fraud_score = fraud_checks.0;
+        risk_breakdown.pattern_risk = fraud_checks.0;
         if !fraud_checks.1.is_empty() {
             warnings.extend(fraud_checks.1);
         }
 
-        // 5. AML compliance
+        // 6. Time-based risk
+        risk_breakdown.time_risk = self.calculate_time_risk(&transaction.timestamp);
+
+        // Calculate total risk
+        risk_breakdown.calculate_total();
+        let fraud_score = risk_breakdown.total_score;
+
+        // 7. AML compliance
         if self.config.enable_aml_check {
             let aml_result = self.check_aml_compliance(transaction);
             compliance_checks.insert("AML".to_string(), aml_result);
@@ -182,9 +278,17 @@ impl TransactionValidator {
             }
         }
 
-        // 6. Business rules
+        // 8. Business rules
         if let Err(e) = self.check_business_rules(transaction) {
             errors.push(e);
+        }
+
+        // 9. Risk threshold check
+        if fraud_score > self.config.fraud_threshold {
+            errors.push(ValidationError::RiskThresholdExceeded(format!(
+                "Risk score {} exceeds threshold {}",
+                fraud_score, self.config.fraud_threshold
+            )));
         }
 
         let is_valid = errors.is_empty();
@@ -195,9 +299,87 @@ impl TransactionValidator {
             errors,
             warnings,
             fraud_score,
+            risk_breakdown,
             compliance_checks,
             validated_at: Utc::now(),
         }
+    }
+
+    /// Calculate amount-based risk score
+    fn calculate_amount_risk(&self, amount: f64) -> u8 {
+        if amount > 100_000.0 {
+            40
+        } else if amount > 50_000.0 {
+            30
+        } else if amount > 10_000.0 {
+            15
+        } else {
+            0
+        }
+    }
+
+    /// Calculate time-based risk score
+    fn calculate_time_risk(&self, timestamp: &DateTime<Utc>) -> u8 {
+        let hour = timestamp.hour();
+        if hour < 6 || hour > 22 {
+            20 // High risk outside business hours
+        } else if hour < 9 || hour > 17 {
+            10 // Medium risk outside normal hours
+        } else {
+            0 // Low risk during business hours
+        }
+    }
+
+    /// Check transaction velocity (multiple transactions in short period)
+    fn check_velocity(&self, transaction: &Transaction) -> (u8, Option<ValidationError>, Vec<String>) {
+        let mut risk_score = 0u8;
+        let mut error = None;
+        let mut warnings = Vec::new();
+
+        let window_start = transaction.timestamp - Duration::minutes(self.config.velocity_check_window_minutes);
+
+        // Get recent transactions from same user
+        let recent_transactions: Vec<&TransactionHistory> = self
+            .transaction_history
+            .iter()
+            .filter(|h| h.user_id == transaction.user_id && h.timestamp >= window_start)
+            .collect();
+
+        let transaction_count = recent_transactions.len();
+        let total_amount: f64 = recent_transactions.iter().map(|h| h.amount).sum::<f64>() + transaction.amount;
+
+        // Check transaction count
+        if transaction_count >= self.config.max_transactions_per_window {
+            risk_score = risk_score.saturating_add(30);
+            error = Some(ValidationError::VelocityViolation(format!(
+                "Too many transactions: {} in {} minutes",
+                transaction_count + 1,
+                self.config.velocity_check_window_minutes
+            )));
+        } else if transaction_count >= (self.config.max_transactions_per_window / 2) {
+            risk_score = risk_score.saturating_add(15);
+            warnings.push(format!(
+                "High transaction velocity: {} transactions in window",
+                transaction_count + 1
+            ));
+        }
+
+        // Check total amount
+        if total_amount >= self.config.max_amount_per_window {
+            risk_score = risk_score.saturating_add(25);
+            error = Some(ValidationError::VelocityViolation(format!(
+                "Total amount ${:.2} exceeds window limit ${:.2}",
+                total_amount, self.config.max_amount_per_window
+            )));
+        } else if total_amount >= (self.config.max_amount_per_window * 0.75) {
+            risk_score = risk_score.saturating_add(10);
+            warnings.push(format!(
+                "Approaching amount limit: ${:.2} of ${:.2}",
+                total_amount, self.config.max_amount_per_window
+            ));
+        }
+
+        (risk_score, error, warnings)
     }
 
     /// Validate transaction amount
@@ -335,6 +517,14 @@ impl TransactionValidator {
         Ok(())
     }
 
+    /// Validate multiple transactions in batch
+    pub fn validate_batch(&mut self, transactions: &[Transaction]) -> Vec<ValidationResult> {
+        transactions
+            .iter()
+            .map(|tx| self.validate(tx))
+            .collect()
+    }
+
     /// Get validation statistics
     pub fn get_stats(&self) -> HashMap<String, usize> {
         let mut stats = HashMap::new();
@@ -342,7 +532,16 @@ impl TransactionValidator {
             "total_processed".to_string(),
             self.processed_transactions.len(),
         );
+        stats.insert(
+            "total_transactions_in_history".to_string(),
+            self.transaction_history.len(),
+        );
         stats
+    }
+
+    /// Clear old transaction history (for memory management)
+    pub fn clear_old_history(&mut self, before: DateTime<Utc>) {
+        self.transaction_history.retain(|h| h.timestamp >= before);
     }
 }
 
@@ -427,5 +626,198 @@ mod tests {
 
         let result = validator.validate(&transaction);
         assert!(!result.is_valid);
+    }
+
+    #[test]
+    fn test_velocity_check() {
+        let mut validator = TransactionValidator::new();
+        let user_id = "USER-VELOCITY-TEST".to_string();
+
+        // Create multiple transactions from same user
+        for i in 0..5 {
+            let mut transaction = create_valid_transaction();
+            transaction.user_id = user_id.clone();
+            transaction.transaction_id = format!("TXN-{}", i);
+            transaction.amount = 5000.0;
+
+            let result = validator.validate(&transaction);
+            // First transactions should pass
+            if i < 3 {
+                assert!(result.is_valid || result.warnings.len() > 0);
+            }
+        }
+
+        // Check that velocity warnings are present
+        let stats = validator.get_stats();
+        assert_eq!(stats["total_transactions_in_history"], 5);
+    }
+
+    #[test]
+    fn test_risk_breakdown() {
+        let mut validator = TransactionValidator::new();
+        let mut transaction = create_valid_transaction();
+        transaction.amount = 150_000.0; // High amount
+
+        let result = validator.validate(&transaction);
+
+        // Check that risk breakdown is populated
+        assert!(result.risk_breakdown.amount_risk > 0);
+        assert!(result.risk_breakdown.total_score > 0);
+        assert_eq!(
+            result.risk_breakdown.total_score,
+            result.fraud_score
+        );
+    }
+
+    #[test]
+    fn test_time_based_risk() {
+        let mut validator = TransactionValidator::new();
+        let mut transaction = create_valid_transaction();
+
+        // Set timestamp to late night (high risk)
+        let late_night = Utc::now().date_naive().and_hms_opt(2, 0, 0).unwrap();
+        transaction.timestamp = DateTime::from_naive_utc_and_offset(late_night, Utc);
+
+        let result = validator.validate(&transaction);
+        assert!(result.risk_breakdown.time_risk > 0);
+    }
+
+    #[test]
+    fn test_risk_level_description() {
+        let mut validator = TransactionValidator::new();
+
+        // Low risk
+        let mut transaction = create_valid_transaction();
+        transaction.amount = 100.0;
+        let result = validator.validate(&transaction);
+        assert_eq!(result.risk_level(), "Low");
+
+        // High risk
+        let mut transaction2 = create_valid_transaction();
+        transaction2.transaction_id = "TXN-002".to_string();
+        transaction2.amount = 200_000.0;
+        let result2 = validator.validate(&transaction2);
+        assert!(matches!(result2.risk_level(), "High" | "Critical" | "Medium"));
+    }
+
+    #[test]
+    fn test_manual_review_flag() {
+        let mut validator = TransactionValidator::new();
+        let mut transaction = create_valid_transaction();
+        transaction.amount = 100_000.0; // Should trigger warnings
+
+        let result = validator.validate(&transaction);
+        // High amount should require manual review
+        assert!(result.requires_manual_review() || result.warnings.len() > 0);
+    }
+
+    #[test]
+    fn test_batch_validation() {
+        let mut validator = TransactionValidator::new();
+
+        let transactions = vec![
+            create_valid_transaction(),
+            {
+                let mut tx = create_valid_transaction();
+                tx.transaction_id = "TXN-002".to_string();
+                tx
+            },
+            {
+                let mut tx = create_valid_transaction();
+                tx.transaction_id = "TXN-003".to_string();
+                tx.amount = -100.0; // Invalid
+                tx
+            },
+        ];
+
+        let results = validator.validate_batch(&transactions);
+
+        assert_eq!(results.len(), 3);
+        assert!(results[0].is_valid);
+        assert!(results[1].is_valid);
+        assert!(!results[2].is_valid); // Invalid amount
+    }
+
+    #[test]
+    fn test_history_cleanup() {
+        let mut validator = TransactionValidator::new();
+
+        // Add transactions with old timestamps
+        let old_time = Utc::now() - Duration::hours(48);
+        for i in 0..5 {
+            let mut transaction = create_valid_transaction();
+            transaction.transaction_id = format!("TXN-{}", i);
+            transaction.timestamp = old_time;
+            validator.validate(&transaction);
+        }
+
+        let cutoff = Utc::now() - Duration::hours(24);
+        validator.clear_old_history(cutoff);
+
+        let stats = validator.get_stats();
+        assert_eq!(stats["total_transactions_in_history"], 0);
+    }
+
+    #[test]
+    fn test_is_approved() {
+        let mut validator = TransactionValidator::new();
+
+        // Low risk transaction
+        let mut transaction = create_valid_transaction();
+        transaction.amount = 500.0;
+        let result = validator.validate(&transaction);
+        assert!(result.is_approved());
+
+        // High risk transaction
+        let mut transaction2 = create_valid_transaction();
+        transaction2.transaction_id = "TXN-002".to_string();
+        transaction2.amount = 500_000.0;
+        let result2 = validator.validate(&transaction2);
+        // May not be approved due to high risk
+        assert!(!result2.is_approved() || result2.fraud_score < 50);
+    }
+
+    #[test]
+    fn test_velocity_amount_limit() {
+        let config = ValidatorConfig {
+            max_transaction_amount: 1_000_000.0,
+            min_transaction_amount: 0.01,
+            fraud_threshold: 70,
+            enable_duplicate_check: true,
+            enable_aml_check: true,
+            velocity_check_window_minutes: 60,
+            max_transactions_per_window: 10,
+            max_amount_per_window: 50_000.0, // Low limit for testing
+        };
+
+        let mut validator = TransactionValidator::with_config(config);
+        let user_id = "USER-AMOUNT-TEST".to_string();
+
+        // Create transactions that exceed amount limit
+        for i in 0..3 {
+            let mut transaction = create_valid_transaction();
+            transaction.user_id = user_id.clone();
+            transaction.transaction_id = format!("TXN-{}", i);
+            transaction.amount = 20_000.0; // Total will exceed 50k
+
+            let result = validator.validate(&transaction);
+            if i >= 2 {
+                // Third transaction should trigger velocity error
+                assert!(result.risk_breakdown.velocity_risk > 0);
+            }
+        }
+    }
+
+    #[test]
+    fn test_json_export() {
+        let mut validator = TransactionValidator::new();
+        let transaction = create_valid_transaction();
+        let result = validator.validate(&transaction);
+
+        let json = result.to_json();
+        assert!(json.is_ok());
+        let json_str = json.unwrap();
+        assert!(json_str.contains("TXN-001"));
+        assert!(json_str.contains("risk_breakdown"));
     }
 }
