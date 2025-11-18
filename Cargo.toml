@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["Tony Chuks Awunor <your-email@example.com>"]
 description = "Memory-safe financial transaction validator for fraud detection and compliance"
 license = "MIT"
-repository = "https://github.com/your-username/rust-transaction-validator"
+repository = "https://github.com/guardsarm/rust-transaction-validator"
 keywords = ["financial", "transaction", "validation", "fraud", "memory-safe"]
 categories = ["finance", "cryptography"]
 
