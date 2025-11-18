@@ -1,5 +1,10 @@
 # Rust Transaction Validator
 
+[![CI](https://github.com/guardsarm/rust-transaction-validator/actions/workflows/ci.yml/badge.svg)](https://github.com/guardsarm/rust-transaction-validator/actions/workflows/ci.yml)
+[![Crates.io](https://img.shields.io/crates/v/rust-transaction-validator.svg)](https://crates.io/crates/rust-transaction-validator)
+[![Documentation](https://docs.rs/rust-transaction-validator/badge.svg)](https://docs.rs/rust-transaction-validator)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A memory-safe financial transaction validator for fraud detection and regulatory compliance. Built with Rust to eliminate vulnerabilities in critical financial transaction processing.
 
 ## Security-First Design
@@ -236,9 +241,9 @@ This library provides technical validation tools. Users are responsible for ensu
 
 ## Related Projects
 
-- [rust-secure-logger](https://github.com/your-username/rust-secure-logger) - Secure logging for audit trails
-- [rust-crypto-utils](https://github.com/your-username/rust-crypto-utils) - Cryptographic utilities
-- [rust-threat-detector](https://github.com/your-username/rust-threat-detector) - SIEM threat detection
+- [rust-secure-logger](https://github.com/guardsarm/rust-secure-logger) - Secure logging for audit trails
+- [rust-crypto-utils](https://github.com/guardsarm/rust-crypto-utils) - Cryptographic utilities
+- [rust-threat-detector](https://github.com/guardsarm/rust-threat-detector) - SIEM threat detection
 
 ## Citation
 
@@ -246,7 +251,7 @@ If you use this validator in research or production systems, please cite:
 
 ```
 Awunor, T.C. (2024). Rust Transaction Validator: Memory-Safe Financial Transaction Processing.
-https://github.com/your-username/rust-transaction-validator
+https://github.com/guardsarm/rust-transaction-validator
 ```
 
 ---
