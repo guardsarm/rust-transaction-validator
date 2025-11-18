@@ -1,6 +1,6 @@
 //! Advanced fraud detection patterns
 
-use crate::{Transaction, ValidationError};
+use crate::Transaction;
 use std::collections::HashMap;
 
 /// Fraud pattern detector
@@ -154,7 +154,7 @@ impl FraudDetector {
     }
 
     fn check_velocity(&self, transaction: &Transaction) -> Option<FraudFlag> {
-        let account = &transaction.from_account;
+        let account = transaction.from_account.as_ref()?;
         if let Some(history) = self.history.get(account) {
             let one_hour_ago = transaction.timestamp - chrono::Duration::hours(1);
             let recent = history
@@ -189,18 +189,21 @@ impl FraudDetector {
         }
 
         // Check against historical average
-        if let Some(history) = self.history.get(&transaction.from_account) {
-            if !history.is_empty() {
-                let avg: f64 = history.iter().map(|t| t.amount).sum::<f64>() / history.len() as f64;
-                if transaction.amount > avg * 5.0 {
-                    return Some(FraudFlag {
-                        flag_type: FraudFlagType::UnusualAmount,
-                        description: format!(
-                            "Amount {} is 5x higher than average {}",
-                            transaction.amount, avg
-                        ),
-                        severity: 20,
-                    });
+        if let Some(account) = &transaction.from_account {
+            if let Some(history) = self.history.get(account) {
+                if !history.is_empty() {
+                    let avg: f64 =
+                        history.iter().map(|t| t.amount).sum::<f64>() / history.len() as f64;
+                    if transaction.amount > avg * 5.0 {
+                        return Some(FraudFlag {
+                            flag_type: FraudFlagType::UnusualAmount,
+                            description: format!(
+                                "Amount {} is 5x higher than average {}",
+                                transaction.amount, avg
+                            ),
+                            severity: 20,
+                        });
+                    }
                 }
             }
         }
@@ -226,12 +229,31 @@ impl FraudDetector {
     fn check_high_risk_country(&self, transaction: &Transaction) -> Option<FraudFlag> {
         if let Some(ref metadata) = transaction.metadata {
             if let Some(country) = metadata.get("country") {
-                if let Some(country_str) = country.as_str() {
-                    if self.high_risk_countries.contains(&country_str.to_string()) {
+                if self.high_risk_countries.contains(country) {
+                    return Some(FraudFlag {
+                        flag_type: FraudFlagType::HighRiskCountry,
+                        description: format!("Transaction from high-risk country: {}", country),
+                        severity: 35,
+                    });
+                }
+            }
+        }
+        None
+    }
+
+    fn check_rapid_succession(&self, transaction: &Transaction) -> Option<FraudFlag> {
+        if let Some(account) = &transaction.from_account {
+            if let Some(history) = self.history.get(account) {
+                if let Some(last) = history.last() {
+                    let time_diff = transaction.timestamp - last.timestamp;
+                    if time_diff < chrono::Duration::seconds(30) {
                         return Some(FraudFlag {
-                            flag_type: FraudFlagType::HighRiskCountry,
-                            description: format!("Transaction from high-risk country: {}", country_str),
-                            severity: 35,
+                            flag_type: FraudFlagType::RapidSuccession,
+                            description: format!(
+                                "Transaction within {} seconds of previous",
+                                time_diff.num_seconds()
+                            ),
+                            severity: 10,
                         });
                     }
                 }
@@ -240,37 +262,22 @@ impl FraudDetector {
         None
     }
 
-    fn check_rapid_succession(&self, transaction: &Transaction) -> Option<FraudFlag> {
-        if let Some(history) = self.history.get(&transaction.from_account) {
-            if let Some(last) = history.last() {
-                let time_diff = transaction.timestamp - last.timestamp;
-                if time_diff < chrono::Duration::seconds(30) {
-                    return Some(FraudFlag {
-                        flag_type: FraudFlagType::RapidSuccession,
-                        description: format!(
-                            "Transaction within {} seconds of previous",
-                            time_diff.num_seconds()
-                        ),
-                        severity: 10,
-                    });
-                }
-            }
-        }
-        None
-    }
-
     fn check_amount_progression(&self, transaction: &Transaction) -> Option<FraudFlag> {
-        if let Some(history) = self.history.get(&transaction.from_account) {
-            if history.len() >= 3 {
-                let last_three: Vec<f64> = history.iter().rev().take(3).map(|t| t.amount).collect();
-                // Check if amounts are incrementing (potential testing pattern)
-                if last_three.windows(2).all(|w| w[0] < w[1]) {
-                    return Some(FraudFlag {
-                        flag_type: FraudFlagType::AmountProgression,
-                        description: "Incrementing amounts detected (potential account testing)"
-                            .to_string(),
-                        severity: 20,
-                    });
+        if let Some(account) = &transaction.from_account {
+            if let Some(history) = self.history.get(account) {
+                if history.len() >= 3 {
+                    let last_three: Vec<f64> =
+                        history.iter().rev().take(3).map(|t| t.amount).collect();
+                    // Check if amounts are incrementing (potential testing pattern)
+                    if last_three.windows(2).all(|w| w[0] < w[1]) {
+                        return Some(FraudFlag {
+                            flag_type: FraudFlagType::AmountProgression,
+                            description:
+                                "Incrementing amounts detected (potential account testing)"
+                                    .to_string(),
+                            severity: 20,
+                        });
+                    }
                 }
             }
         }
@@ -278,11 +285,12 @@ impl FraudDetector {
     }
 
     fn add_to_history(&mut self, transaction: Transaction) {
-        let account = transaction.from_account.clone();
-        self.history
-            .entry(account)
-            .or_insert_with(Vec::new)
-            .push(transaction);
+        if let Some(account) = transaction.from_account.clone() {
+            self.history
+                .entry(account)
+                .or_default()
+                .push(transaction);
+        }
     }
 
     /// Clear old history (keep last 24 hours)
@@ -331,13 +339,14 @@ mod tests {
 
     fn create_test_transaction(amount: f64) -> Transaction {
         Transaction {
-            id: "TXN-001".to_string(),
-            from_account: "ACC-123".to_string(),
-            to_account: "ACC-456".to_string(),
+            transaction_id: "TXN-001".to_string(),
+            from_account: Some("ACC-123".to_string()),
+            to_account: Some("ACC-456".to_string()),
             amount,
             currency: "USD".to_string(),
             timestamp: Utc::now(),
-            transaction_type: "transfer".to_string(),
+            transaction_type: crate::TransactionType::Transfer,
+            user_id: "USER-001".to_string(),
             metadata: None,
         }
     }
@@ -400,7 +409,9 @@ mod tests {
     fn test_high_risk_country() {
         let mut detector = FraudDetector::new();
         let mut txn = create_test_transaction(1000.0);
-        txn.metadata = Some(serde_json::json!({"country": "IR"}));
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert("country".to_string(), "IR".to_string());
+        txn.metadata = Some(metadata);
 
         let score = detector.calculate_fraud_score(&txn);
         assert!(score

@@ -16,13 +16,13 @@
 //! Implements secure financial transaction processing using memory-safe Rust,
 //! aligning with 2024 CISA/FBI guidance for critical financial infrastructure.
 
-pub mod fraud_patterns;
 pub mod aml_compliance;
+pub mod fraud_patterns;
 
+pub use aml_compliance::{AMLChecker, AMLResult, KYCValidationResult, KYCValidator};
 pub use fraud_patterns::{FraudDetector, FraudScore, FraudThresholds, RiskLevel};
-pub use aml_compliance::{AMLChecker, AMLResult, KYCValidator, KYCValidationResult};
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, Timelike, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -78,7 +78,8 @@ impl RiskBreakdown {
     }
 
     fn calculate_total(&mut self) {
-        self.total_score = self.amount_risk
+        self.total_score = self
+            .amount_risk
             .saturating_add(self.velocity_risk)
             .saturating_add(self.pattern_risk)
             .saturating_add(self.time_risk)
@@ -94,6 +95,18 @@ pub enum TransactionType {
     Transfer,
     Payment,
     WireTransfer,
+}
+
+impl std::fmt::Display for TransactionType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TransactionType::Deposit => write!(f, "deposit"),
+            TransactionType::Withdrawal => write!(f, "withdrawal"),
+            TransactionType::Transfer => write!(f, "transfer"),
+            TransactionType::Payment => write!(f, "payment"),
+            TransactionType::WireTransfer => write!(f, "wire_transfer"),
+        }
+    }
 }
 
 /// Transaction structure
@@ -234,12 +247,16 @@ impl TransactionValidator {
 
         // 3. Duplicate detection
         if self.config.enable_duplicate_check {
-            if self.processed_transactions.contains(&transaction.transaction_id) {
+            if self
+                .processed_transactions
+                .contains(&transaction.transaction_id)
+            {
                 errors.push(ValidationError::DuplicateTransaction(
                     transaction.transaction_id.clone(),
                 ));
             } else {
-                self.processed_transactions.push(transaction.transaction_id.clone());
+                self.processed_transactions
+                    .push(transaction.transaction_id.clone());
             }
         }
 
@@ -328,9 +345,9 @@ impl TransactionValidator {
     /// Calculate time-based risk score
     fn calculate_time_risk(&self, timestamp: &DateTime<Utc>) -> u8 {
         let hour = timestamp.hour();
-        if hour < 6 || hour > 22 {
+        if !(6..=22).contains(&hour) {
             20 // High risk outside business hours
-        } else if hour < 9 || hour > 17 {
+        } else if !(9..=17).contains(&hour) {
             10 // Medium risk outside normal hours
         } else {
             0 // Low risk during business hours
@@ -338,12 +355,16 @@ impl TransactionValidator {
     }
 
     /// Check transaction velocity (multiple transactions in short period)
-    fn check_velocity(&self, transaction: &Transaction) -> (u8, Option<ValidationError>, Vec<String>) {
+    fn check_velocity(
+        &self,
+        transaction: &Transaction,
+    ) -> (u8, Option<ValidationError>, Vec<String>) {
         let mut risk_score = 0u8;
         let mut error = None;
         let mut warnings = Vec::new();
 
-        let window_start = transaction.timestamp - Duration::minutes(self.config.velocity_check_window_minutes);
+        let window_start =
+            transaction.timestamp - Duration::minutes(self.config.velocity_check_window_minutes);
 
         // Get recent transactions from same user
         let recent_transactions: Vec<&TransactionHistory> = self
@@ -353,7 +374,8 @@ impl TransactionValidator {
             .collect();
 
         let transaction_count = recent_transactions.len();
-        let total_amount: f64 = recent_transactions.iter().map(|h| h.amount).sum::<f64>() + transaction.amount;
+        let total_amount: f64 =
+            recent_transactions.iter().map(|h| h.amount).sum::<f64>() + transaction.amount;
 
         // Check transaction count
         if transaction_count >= self.config.max_transactions_per_window {
@@ -416,7 +438,8 @@ impl TransactionValidator {
 
     /// Validate account numbers
     fn validate_accounts(&self, transaction: &Transaction) -> Result<(), ValidationError> {
-        let account_regex = Regex::new(r"^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$").unwrap();
+        let account_regex =
+            Regex::new(r"^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$").unwrap();
 
         if let Some(ref from_account) = transaction.from_account {
             if !account_regex.is_match(from_account) && !from_account.starts_with("****") {
@@ -464,7 +487,7 @@ impl TransactionValidator {
 
         // Pattern 4: Unusual timestamp (outside business hours)
         let hour = transaction.timestamp.hour();
-        if hour < 6 || hour > 22 {
+        if !(6..=22).contains(&hour) {
             score += 10;
             warnings.push("Transaction outside business hours".to_string());
         }
@@ -495,30 +518,30 @@ impl TransactionValidator {
     /// Check business rules
     fn check_business_rules(&self, transaction: &Transaction) -> Result<(), ValidationError> {
         // Rule 1: Transfers must have both from and to accounts
-        if transaction.transaction_type == TransactionType::Transfer {
-            if transaction.from_account.is_none() || transaction.to_account.is_none() {
-                return Err(ValidationError::BusinessRuleViolation(
-                    "Transfers must specify both from and to accounts".to_string(),
-                ));
-            }
+        if transaction.transaction_type == TransactionType::Transfer
+            && (transaction.from_account.is_none() || transaction.to_account.is_none())
+        {
+            return Err(ValidationError::BusinessRuleViolation(
+                "Transfers must specify both from and to accounts".to_string(),
+            ));
         }
 
         // Rule 2: Deposits must have to_account
-        if transaction.transaction_type == TransactionType::Deposit {
-            if transaction.to_account.is_none() {
-                return Err(ValidationError::BusinessRuleViolation(
-                    "Deposits must specify to_account".to_string(),
-                ));
-            }
+        if transaction.transaction_type == TransactionType::Deposit
+            && transaction.to_account.is_none()
+        {
+            return Err(ValidationError::BusinessRuleViolation(
+                "Deposits must specify to_account".to_string(),
+            ));
         }
 
         // Rule 3: Withdrawals must have from_account
-        if transaction.transaction_type == TransactionType::Withdrawal {
-            if transaction.from_account.is_none() {
-                return Err(ValidationError::BusinessRuleViolation(
-                    "Withdrawals must specify from_account".to_string(),
-                ));
-            }
+        if transaction.transaction_type == TransactionType::Withdrawal
+            && transaction.from_account.is_none()
+        {
+            return Err(ValidationError::BusinessRuleViolation(
+                "Withdrawals must specify from_account".to_string(),
+            ));
         }
 
         Ok(())
@@ -526,10 +549,7 @@ impl TransactionValidator {
 
     /// Validate multiple transactions in batch
     pub fn validate_batch(&mut self, transactions: &[Transaction]) -> Vec<ValidationResult> {
-        transactions
-            .iter()
-            .map(|tx| self.validate(tx))
-            .collect()
+        transactions.iter().map(|tx| self.validate(tx)).collect()
     }
 
     /// Get validation statistics
@@ -607,10 +627,10 @@ mod tests {
 
         let result2 = validator.validate(&transaction);
         assert!(!result2.is_valid);
-        assert!(result2.errors.iter().any(|e| matches!(
-            e,
-            ValidationError::DuplicateTransaction(_)
-        )));
+        assert!(result2
+            .errors
+            .iter()
+            .any(|e| matches!(e, ValidationError::DuplicateTransaction(_))));
     }
 
     #[test]
@@ -650,7 +670,7 @@ mod tests {
             let result = validator.validate(&transaction);
             // First transactions should pass
             if i < 3 {
-                assert!(result.is_valid || result.warnings.len() > 0);
+                assert!(result.is_valid || !result.warnings.is_empty());
             }
         }
 
@@ -670,10 +690,7 @@ mod tests {
         // Check that risk breakdown is populated
         assert!(result.risk_breakdown.amount_risk > 0);
         assert!(result.risk_breakdown.total_score > 0);
-        assert_eq!(
-            result.risk_breakdown.total_score,
-            result.fraud_score
-        );
+        assert_eq!(result.risk_breakdown.total_score, result.fraud_score);
     }
 
     #[test]
@@ -704,7 +721,10 @@ mod tests {
         transaction2.transaction_id = "TXN-002".to_string();
         transaction2.amount = 200_000.0;
         let result2 = validator.validate(&transaction2);
-        assert!(matches!(result2.risk_level(), "High" | "Critical" | "Medium"));
+        assert!(matches!(
+            result2.risk_level(),
+            "High" | "Critical" | "Medium"
+        ));
     }
 
     #[test]
@@ -715,7 +735,7 @@ mod tests {
 
         let result = validator.validate(&transaction);
         // High amount should require manual review
-        assert!(result.requires_manual_review() || result.warnings.len() > 0);
+        assert!(result.requires_manual_review() || !result.warnings.is_empty());
     }
 
     #[test]

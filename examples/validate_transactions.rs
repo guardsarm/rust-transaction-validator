@@ -3,8 +3,10 @@
 //! This example demonstrates financial transaction validation including
 //! fraud detection, compliance checks, and business rule enforcement.
 
-use rust_transaction_validator::{Transaction, TransactionType, TransactionValidator, ValidatorConfig};
 use chrono::Utc;
+use rust_transaction_validator::{
+    Transaction, TransactionType, TransactionValidator, ValidatorConfig,
+};
 use std::collections::HashMap;
 
 fn main() {
@@ -25,7 +27,10 @@ fn main() {
         timestamp: Utc::now(),
         user_id: "USER-12345".to_string(),
         metadata: Some(HashMap::from([
-            ("beneficiary_name".to_string(), "Corporate Account".to_string()),
+            (
+                "beneficiary_name".to_string(),
+                "Corporate Account".to_string(),
+            ),
             ("purpose".to_string(), "Business payment".to_string()),
         ])),
     };
@@ -172,7 +177,10 @@ fn main() {
             println!("   ✓ {} - Approved", transaction.transaction_id);
         } else {
             rejected += 1;
-            println!("   ✗ {} - Rejected: {:?}", transaction.transaction_id, result.errors);
+            println!(
+                "   ✗ {} - Rejected: {:?}",
+                transaction.transaction_id, result.errors
+            );
         }
     }
 
@@ -187,6 +195,9 @@ fn main() {
         fraud_threshold: 90,
         enable_duplicate_check: true,
         enable_aml_check: true,
+        velocity_check_window_minutes: 60,
+        max_transactions_per_window: 10,
+        max_amount_per_window: 100_000.0,
     };
 
     let mut custom_validator = TransactionValidator::with_config(custom_config);

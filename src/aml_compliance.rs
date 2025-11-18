@@ -25,8 +25,8 @@ pub struct AMLThresholds {
 impl Default for AMLThresholds {
     fn default() -> Self {
         Self {
-            ctr_threshold: 10000.0,  // FinCEN CTR requirement
-            sar_threshold: 5000.0,    // FinCEN SAR guideline
+            ctr_threshold: 10000.0,        // FinCEN CTR requirement
+            sar_threshold: 5000.0,         // FinCEN SAR guideline
             structuring_threshold: 9500.0, // Just under $10k
         }
     }
@@ -120,9 +120,17 @@ impl AMLChecker {
         }
 
         // Sanctioned entity check
-        if self.is_sanctioned_entity(&transaction.from_account)
-            || self.is_sanctioned_entity(&transaction.to_account)
-        {
+        let from_sanctioned = transaction
+            .from_account
+            .as_deref()
+            .map(|a| self.is_sanctioned_entity(a))
+            .unwrap_or(false);
+        let to_sanctioned = transaction
+            .to_account
+            .as_deref()
+            .map(|a| self.is_sanctioned_entity(a))
+            .unwrap_or(false);
+        if from_sanctioned || to_sanctioned {
             red_flags.push(AMLRedFlag {
                 flag_type: RedFlagType::SanctionedEntity,
                 description: "Transaction involves sanctioned entity".to_string(),
@@ -134,7 +142,11 @@ impl AMLChecker {
 
         // Cross-border transaction check
         if let Some(ref metadata) = transaction.metadata {
-            if metadata.get("cross_border").and_then(|v| v.as_bool()) == Some(true) {
+            if metadata
+                .get("cross_border")
+                .map(|v| v == "true")
+                .unwrap_or(false)
+            {
                 red_flags.push(AMLRedFlag {
                     flag_type: RedFlagType::CrossBorder,
                     description: "Cross-border transaction requires additional due diligence"
@@ -146,20 +158,20 @@ impl AMLChecker {
         }
 
         // Cash intensive check
-        if transaction.transaction_type == "cash_deposit"
-            || transaction.transaction_type == "cash_withdrawal"
+        if matches!(
+            transaction.transaction_type,
+            crate::TransactionType::Deposit | crate::TransactionType::Withdrawal
+        ) && transaction.amount >= 5000.0
         {
-            if transaction.amount >= 5000.0 {
-                red_flags.push(AMLRedFlag {
-                    flag_type: RedFlagType::CashIntensive,
-                    description: format!(
-                        "Large cash {} of {}",
-                        transaction.transaction_type, transaction.amount
-                    ),
-                    severity: AlertSeverity::High,
-                });
-                risk_score += 25;
-            }
+            red_flags.push(AMLRedFlag {
+                flag_type: RedFlagType::CashIntensive,
+                description: format!(
+                    "Large cash {} of {}",
+                    transaction.transaction_type, transaction.amount
+                ),
+                severity: AlertSeverity::High,
+            });
+            risk_score += 25;
         }
 
         AMLResult {
@@ -209,7 +221,13 @@ impl KYCValidator {
         let mut warnings = Vec::new();
 
         // Required fields for KYC
-        let required = ["full_name", "date_of_birth", "address", "id_number", "id_type"];
+        let required = [
+            "full_name",
+            "date_of_birth",
+            "address",
+            "id_number",
+            "id_type",
+        ];
 
         for field in &required {
             if customer_data.get(field).is_none() {
@@ -220,21 +238,30 @@ impl KYCValidator {
         // Check for enhanced due diligence triggers
         if let Some(country) = customer_data.get("country").and_then(|v| v.as_str()) {
             if Self::is_high_risk_jurisdiction(country) {
-                warnings.push("Customer from high-risk jurisdiction - Enhanced Due Diligence required".to_string());
+                warnings.push(
+                    "Customer from high-risk jurisdiction - Enhanced Due Diligence required"
+                        .to_string(),
+                );
             }
         }
 
-        if let Some(pep) = customer_data.get("politically_exposed_person").and_then(|v| v.as_bool()) {
+        if let Some(pep) = customer_data
+            .get("politically_exposed_person")
+            .and_then(|v| v.as_bool())
+        {
             if pep {
-                warnings.push("Politically Exposed Person - Enhanced Due Diligence required".to_string());
+                warnings.push(
+                    "Politically Exposed Person - Enhanced Due Diligence required".to_string(),
+                );
             }
         }
 
+        let requires_enhanced_dd = !warnings.is_empty();
         KYCValidationResult {
             valid: missing_fields.is_empty(),
             missing_fields,
             warnings,
-            requires_enhanced_dd: !warnings.is_empty(),
+            requires_enhanced_dd,
         }
     }
 
@@ -258,15 +285,16 @@ mod tests {
     use super::*;
     use chrono::Utc;
 
-    fn create_test_transaction(amount: f64, txn_type: &str) -> Transaction {
+    fn create_test_transaction(amount: f64, txn_type: crate::TransactionType) -> Transaction {
         Transaction {
-            id: "TXN-001".to_string(),
-            from_account: "ACC-123".to_string(),
-            to_account: "ACC-456".to_string(),
+            transaction_id: "TXN-001".to_string(),
+            from_account: Some("ACC-123".to_string()),
+            to_account: Some("ACC-456".to_string()),
             amount,
             currency: "USD".to_string(),
             timestamp: Utc::now(),
-            transaction_type: txn_type.to_string(),
+            transaction_type: txn_type,
+            user_id: "USER-001".to_string(),
             metadata: None,
         }
     }
@@ -274,7 +302,7 @@ mod tests {
     #[test]
     fn test_ctr_requirement() {
         let checker = AMLChecker::new();
-        let txn = create_test_transaction(15000.0, "transfer");
+        let txn = create_test_transaction(15000.0, crate::TransactionType::Transfer);
         let result = checker.check_compliance(&txn);
 
         assert!(result.requires_ctr);
@@ -287,7 +315,7 @@ mod tests {
     #[test]
     fn test_structuring_detection() {
         let checker = AMLChecker::new();
-        let txn = create_test_transaction(9800.0, "transfer");
+        let txn = create_test_transaction(9800.0, crate::TransactionType::Transfer);
         let result = checker.check_compliance(&txn);
 
         assert!(result.requires_sar);
@@ -300,8 +328,8 @@ mod tests {
     #[test]
     fn test_sanctioned_entity() {
         let checker = AMLChecker::new();
-        let mut txn = create_test_transaction(1000.0, "transfer");
-        txn.from_account = "OFAC-SANCTIONED-001".to_string();
+        let mut txn = create_test_transaction(1000.0, crate::TransactionType::Transfer);
+        txn.from_account = Some("OFAC-SANCTIONED-001".to_string());
 
         let result = checker.check_compliance(&txn);
 
@@ -316,7 +344,7 @@ mod tests {
     #[test]
     fn test_cash_intensive() {
         let checker = AMLChecker::new();
-        let txn = create_test_transaction(8000.0, "cash_deposit");
+        let txn = create_test_transaction(8000.0, crate::TransactionType::Deposit);
         let result = checker.check_compliance(&txn);
 
         assert!(result
@@ -328,8 +356,10 @@ mod tests {
     #[test]
     fn test_cross_border() {
         let checker = AMLChecker::new();
-        let mut txn = create_test_transaction(5000.0, "transfer");
-        txn.metadata = Some(serde_json::json!({"cross_border": true}));
+        let mut txn = create_test_transaction(5000.0, crate::TransactionType::Transfer);
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert("cross_border".to_string(), "true".to_string());
+        txn.metadata = Some(metadata);
 
         let result = checker.check_compliance(&txn);
 
