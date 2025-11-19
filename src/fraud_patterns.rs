@@ -393,16 +393,32 @@ mod tests {
             ..Default::default()
         });
 
-        for _ in 0..3 {
-            let txn = create_test_transaction(100.0);
-            let score = detector.calculate_fraud_score(&txn);
-            if detector.get_transaction_count("ACC-123") >= 2 {
-                assert!(score
-                    .flags
-                    .iter()
-                    .any(|f| f.flag_type == FraudFlagType::VelocityExceeded));
-            }
-        }
+        // First transaction - should pass
+        let mut txn1 = create_test_transaction(100.0);
+        txn1.transaction_id = "TXN-VEL-001".to_string();
+        let score1 = detector.calculate_fraud_score(&txn1);
+        assert!(score1
+            .flags
+            .iter()
+            .all(|f| f.flag_type != FraudFlagType::VelocityExceeded));
+
+        // Second transaction - should pass (at limit but not exceeded)
+        let mut txn2 = create_test_transaction(100.0);
+        txn2.transaction_id = "TXN-VEL-002".to_string();
+        let score2 = detector.calculate_fraud_score(&txn2);
+        assert!(score2
+            .flags
+            .iter()
+            .all(|f| f.flag_type != FraudFlagType::VelocityExceeded));
+
+        // Third transaction - should trigger velocity flag (exceeds limit of 2)
+        let mut txn3 = create_test_transaction(100.0);
+        txn3.transaction_id = "TXN-VEL-003".to_string();
+        let score3 = detector.calculate_fraud_score(&txn3);
+        assert!(score3
+            .flags
+            .iter()
+            .any(|f| f.flag_type == FraudFlagType::VelocityExceeded));
     }
 
     #[test]

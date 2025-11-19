@@ -583,14 +583,22 @@ mod tests {
     use super::*;
 
     fn create_valid_transaction() -> Transaction {
+        // Create timestamp at 12 PM UTC (business hours) to minimize time-based risk
+        let now = Utc::now();
+        let timestamp = now
+            .date_naive()
+            .and_hms_opt(12, 0, 0)
+            .unwrap()
+            .and_utc();
+
         Transaction {
             transaction_id: "TXN-001".to_string(),
             transaction_type: TransactionType::Transfer,
             amount: 1000.0,
             currency: "USD".to_string(),
-            from_account: Some("ACCT-1234-5678-9012-3456".to_string()),
-            to_account: Some("ACCT-6789-0123-4567-8901".to_string()),
-            timestamp: Utc::now(),
+            from_account: Some("ACCT-1234-5678-9012".to_string()),
+            to_account: Some("ACCT-6789-0123-4567".to_string()),
+            timestamp,
             user_id: "USER-001".to_string(),
             metadata: None,
         }
@@ -602,7 +610,15 @@ mod tests {
         let transaction = create_valid_transaction();
         let result = validator.validate(&transaction);
 
-        assert!(result.is_valid);
+        // Debug output
+        if !result.is_valid {
+            eprintln!("Validation failed!");
+            eprintln!("Errors: {:?}", result.errors);
+            eprintln!("Fraud score: {}", result.fraud_score);
+            eprintln!("Risk breakdown: {:?}", result.risk_breakdown);
+        }
+
+        assert!(result.is_valid, "Transaction should be valid. Errors: {:?}, Fraud score: {}", result.errors, result.fraud_score);
         assert!(result.errors.is_empty());
     }
 
