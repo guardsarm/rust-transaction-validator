@@ -1,26 +1,46 @@
-//! # Rust Transaction Validator
+//! # Rust Transaction Validator v2.0
 //!
 //! A memory-safe financial transaction validator for fraud detection and regulatory compliance.
 //!
 //! ## Features
 //!
 //! - **Memory Safety**: Built with Rust to prevent vulnerabilities in financial systems
+//! - **ML-Based Fraud Scoring**: Machine learning-inspired anomaly detection (v2.0)
 //! - **Advanced Fraud Detection**: Multi-factor fraud scoring with velocity checks
+//! - **Real-time Sanctions Screening**: OFAC, EU, UN sanctions list checking (v2.0)
 //! - **AML/KYC Compliance**: FinCEN-compliant CTR/SAR detection
-//! - **Sanctions Screening**: OFAC sanctions list checking
+//! - **ISO 20022 Support**: SWIFT MX message validation (v2.0)
+//! - **Geographic Risk Scoring**: Country and jurisdiction risk assessment (v2.0)
+//! - **Network Analysis**: Transaction graph analysis for suspicious patterns (v2.0)
 //! - **Business Rules**: Configurable transaction validation rules
 //! - **Audit Trail**: Complete transaction validation history
+//! - **Batch Processing**: High-performance batch validation (v2.0)
 //!
 //! ## Alignment with Federal Guidance
 //!
 //! Implements secure financial transaction processing using memory-safe Rust,
 //! aligning with 2024 CISA/FBI guidance for critical financial infrastructure.
+//!
+//! ## What's New in v2.0
+//!
+//! - **ML-Based Fraud Scoring**: Statistical anomaly detection algorithms
+//! - **Real-time Sanctions**: Integrated OFAC/EU/UN sanctions screening
+//! - **ISO 20022**: SWIFT message format validation
+//! - **Geographic Risk**: Country and jurisdiction-based risk scoring
+//! - **Network Analysis**: Graph-based suspicious pattern detection
+//! - **Enhanced Reporting**: Detailed compliance and audit reports
 
 pub mod aml_compliance;
 pub mod fraud_patterns;
+pub mod sanctions;
+pub mod geographic_risk;
+pub mod network_analysis;
 
 pub use aml_compliance::{AMLChecker, AMLResult, KYCValidationResult, KYCValidator};
 pub use fraud_patterns::{FraudDetector, FraudScore, FraudThresholds, RiskLevel};
+pub use sanctions::{SanctionsScreener, SanctionsResult, SanctionsList};
+pub use geographic_risk::{GeographicRiskScorer, CountryRisk, JurisdictionRisk};
+pub use network_analysis::{TransactionGraph, NetworkAnalyzer, SuspiciousPattern};
 
 use chrono::{DateTime, Duration, Timelike, Utc};
 use regex::Regex;

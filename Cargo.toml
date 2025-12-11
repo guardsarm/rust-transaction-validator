@@ -1,13 +1,21 @@
 [package]
 name = "rust-transaction-validator"
-version = "0.1.0"
+version = "2.0.0"
 edition = "2021"
 authors = ["Tony Chuks Awunor <chuksawunor@guardsarm.com>"]
-description = "Memory-safe financial transaction validator for fraud detection and compliance"
+description = "Memory-safe financial transaction validator with ML-based fraud detection, real-time sanctions screening, and ISO 20022 support"
 license = "MIT"
 repository = "https://github.com/guardsarm/rust-transaction-validator"
 keywords = ["financial", "transaction", "validation", "fraud", "memory-safe"]
 categories = ["finance", "cryptography"]
+readme = "README.md"
+
+[features]
+default = ["full"]
+full = ["sanctions", "ml-scoring"]
+sanctions = []
+ml-scoring = []
+iso20022 = []
 
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
@@ -15,10 +23,25 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 regex = "1.10"
 thiserror = "1.0"
+uuid = { version = "1.6", features = ["v4"] }
+sha2 = "0.10"
 
 [dev-dependencies]
 criterion = "0.5"
+tempfile = "3.8"
 
 [[example]]
 name = "validate_transactions"
 path = "examples/validate_transactions.rs"
+
+[[example]]
+name = "batch_validation"
+path = "examples/batch_validation.rs"
+
+[[example]]
+name = "compliance_report"
+path = "examples/compliance_report.rs"
+
+[[bench]]
+name = "validator_benchmark"
+harness = false
