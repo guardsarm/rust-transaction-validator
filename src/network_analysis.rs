@@ -2,7 +2,7 @@
 //!
 //! Provides graph-based analysis for detecting suspicious transaction patterns.
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -29,6 +29,7 @@ pub enum SuspiciousPattern {
 
 /// Transaction node in the graph
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct TransactionNode {
     account_id: String,
     total_inflow: f64,
@@ -59,6 +60,7 @@ impl TransactionNode {
         self.incoming_accounts.len() >= 5 && self.outgoing_accounts.len() <= 2
     }
 
+    #[allow(dead_code)]
     fn is_distributor(&self) -> bool {
         // Few incoming, many outgoing
         self.incoming_accounts.len() <= 2 && self.outgoing_accounts.len() >= 5
@@ -76,6 +78,7 @@ impl TransactionNode {
 
 /// Edge in the transaction graph
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct TransactionEdge {
     from_account: String,
     to_account: String,
@@ -136,13 +139,16 @@ impl TransactionGraph {
 
         // Update edge
         let edge_key = (from_account.to_string(), to_account.to_string());
-        let edge = self.edges.entry(edge_key.clone()).or_insert_with(|| TransactionEdge {
-            from_account: from_account.to_string(),
-            to_account: to_account.to_string(),
-            total_amount: 0.0,
-            transaction_count: 0,
-            timestamps: Vec::new(),
-        });
+        let edge = self
+            .edges
+            .entry(edge_key.clone())
+            .or_insert_with(|| TransactionEdge {
+                from_account: from_account.to_string(),
+                to_account: to_account.to_string(),
+                total_amount: 0.0,
+                transaction_count: 0,
+                timestamps: Vec::new(),
+            });
         edge.total_amount += amount;
         edge.transaction_count += 1;
         edge.timestamps.push(timestamp);
@@ -226,7 +232,7 @@ impl TransactionGraph {
         let mut results = Vec::new();
         let threshold_margin = self.reporting_threshold * 0.15; // 15% below threshold
 
-        for (account_id, node) in &self.nodes {
+        for account_id in self.nodes.keys() {
             // Get all outgoing transaction amounts for this account
             let mut suspicious_amounts = Vec::new();
 
@@ -347,13 +353,7 @@ impl NetworkAnalyzer {
     }
 
     /// Add transaction to the analyzer
-    pub fn add_transaction(
-        &mut self,
-        from: &str,
-        to: &str,
-        amount: f64,
-        timestamp: DateTime<Utc>,
-    ) {
+    pub fn add_transaction(&mut self, from: &str, to: &str, amount: f64, timestamp: DateTime<Utc>) {
         self.graph.add_transaction(from, to, amount, timestamp);
     }
 

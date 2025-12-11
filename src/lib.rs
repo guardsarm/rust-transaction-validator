@@ -32,15 +32,15 @@
 
 pub mod aml_compliance;
 pub mod fraud_patterns;
-pub mod sanctions;
 pub mod geographic_risk;
 pub mod network_analysis;
+pub mod sanctions;
 
 pub use aml_compliance::{AMLChecker, AMLResult, KYCValidationResult, KYCValidator};
 pub use fraud_patterns::{FraudDetector, FraudScore, FraudThresholds, RiskLevel};
-pub use sanctions::{SanctionsScreener, SanctionsResult, SanctionsList};
-pub use geographic_risk::{GeographicRiskScorer, CountryRisk, JurisdictionRisk};
-pub use network_analysis::{TransactionGraph, NetworkAnalyzer, SuspiciousPattern};
+pub use geographic_risk::{CountryRisk, GeographicRiskScorer, JurisdictionRisk};
+pub use network_analysis::{NetworkAnalyzer, SuspiciousPattern, TransactionGraph};
+pub use sanctions::{SanctionsList, SanctionsResult, SanctionsScreener};
 
 use chrono::{DateTime, Duration, Timelike, Utc};
 use regex::Regex;
@@ -605,11 +605,7 @@ mod tests {
     fn create_valid_transaction() -> Transaction {
         // Create timestamp at 12 PM UTC (business hours) to minimize time-based risk
         let now = Utc::now();
-        let timestamp = now
-            .date_naive()
-            .and_hms_opt(12, 0, 0)
-            .unwrap()
-            .and_utc();
+        let timestamp = now.date_naive().and_hms_opt(12, 0, 0).unwrap().and_utc();
 
         Transaction {
             transaction_id: "TXN-001".to_string(),
@@ -638,7 +634,11 @@ mod tests {
             eprintln!("Risk breakdown: {:?}", result.risk_breakdown);
         }
 
-        assert!(result.is_valid, "Transaction should be valid. Errors: {:?}, Fraud score: {}", result.errors, result.fraud_score);
+        assert!(
+            result.is_valid,
+            "Transaction should be valid. Errors: {:?}, Fraud score: {}",
+            result.errors, result.fraud_score
+        );
         assert!(result.errors.is_empty());
     }
 

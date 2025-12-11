@@ -286,10 +286,7 @@ impl FraudDetector {
 
     fn add_to_history(&mut self, transaction: Transaction) {
         if let Some(account) = transaction.from_account.clone() {
-            self.history
-                .entry(account)
-                .or_default()
-                .push(transaction);
+            self.history.entry(account).or_default().push(transaction);
         }
     }
 

@@ -56,13 +56,18 @@ impl SanctionsResult {
     /// Get highest confidence match
     pub fn highest_confidence(&self) -> Option<&SanctionsMatch> {
         self.matches.iter().max_by(|a, b| {
-            a.confidence.partial_cmp(&b.confidence).unwrap_or(std::cmp::Ordering::Equal)
+            a.confidence
+                .partial_cmp(&b.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
         })
     }
 
     /// Get matches above threshold
     pub fn matches_above_threshold(&self, threshold: f32) -> Vec<&SanctionsMatch> {
-        self.matches.iter().filter(|m| m.confidence >= threshold).collect()
+        self.matches
+            .iter()
+            .filter(|m| m.confidence >= threshold)
+            .collect()
     }
 }
 
@@ -216,8 +221,10 @@ impl SanctionsScreener {
 
             // Partial match (contains)
             if entity.name.contains(&name_upper) || name_upper.contains(&entity.name) {
-                let partial_conf = 0.7 + (0.2 * (name_upper.len().min(entity.name.len()) as f32
-                    / name_upper.len().max(entity.name.len()) as f32));
+                let partial_conf = 0.7
+                    + (0.2
+                        * (name_upper.len().min(entity.name.len()) as f32
+                            / name_upper.len().max(entity.name.len()) as f32));
 
                 if !matches.iter().any(|m| m.entry_id == entity.id) {
                     matches.push(SanctionsMatch {
@@ -234,7 +241,11 @@ impl SanctionsScreener {
         }
 
         // Sort by confidence
-        matches.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+        matches.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         SanctionsResult {
             screened_value: name.to_string(),
@@ -261,9 +272,7 @@ impl SanctionsScreener {
         let max_len = len1.max(len2);
 
         // Simple character-based similarity
-        let common_chars: usize = s1.chars()
-            .filter(|c| s2.contains(*c))
-            .count();
+        let common_chars: usize = s1.chars().filter(|c| s2.contains(*c)).count();
 
         let char_similarity = common_chars as f32 / max_len as f32;
 
@@ -324,7 +333,10 @@ mod tests {
         let result = screener.screen("ENTITY ONE");
 
         assert!(result.is_match);
-        assert!(result.matches.iter().any(|m| m.match_type == MatchType::Alias));
+        assert!(result
+            .matches
+            .iter()
+            .any(|m| m.match_type == MatchType::Alias));
     }
 
     #[test]
@@ -377,7 +389,7 @@ mod tests {
         screener.set_fuzzy_threshold(0.95); // Very strict
 
         let result = screener.screen("SANCTIONED ENTTY ONE"); // Typo
-        // Should have lower confidence due to typo
+                                                              // Should have lower confidence due to typo
         if result.is_match {
             assert!(result.matches[0].confidence < 1.0);
         }

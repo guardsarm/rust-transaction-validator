@@ -34,7 +34,10 @@ impl CountryRisk {
 
     /// Check if enhanced due diligence is required
     pub fn requires_edd(&self) -> bool {
-        matches!(self.risk_level, CountryRiskLevel::High | CountryRiskLevel::Prohibited)
+        matches!(
+            self.risk_level,
+            CountryRiskLevel::High | CountryRiskLevel::Prohibited
+        )
     }
 }
 
@@ -46,7 +49,7 @@ pub struct JurisdictionRisk {
     pub is_offshore: bool,
     pub is_fatf_greylist: bool,
     pub is_fatf_blacklist: bool,
-    pub transparency_score: u8, // 0-100
+    pub transparency_score: u8,  // 0-100
     pub regulatory_strength: u8, // 0-100
     pub overall_risk: CountryRiskLevel,
 }
@@ -117,10 +120,7 @@ impl GeographicRiskScorer {
             country_name: "North Korea".to_string(),
             risk_level: CountryRiskLevel::Prohibited,
             risk_score: 100,
-            factors: vec![
-                "FATF Blacklist".to_string(),
-                "UN Sanctions".to_string(),
-            ],
+            factors: vec!["FATF Blacklist".to_string(), "UN Sanctions".to_string()],
             fatf_status: Some("Blacklist".to_string()),
             sanctions_programs: vec!["OFAC North Korea".to_string(), "UN Sanctions".to_string()],
         });
@@ -144,7 +144,10 @@ impl GeographicRiskScorer {
             country_name: "Myanmar".to_string(),
             risk_level: CountryRiskLevel::High,
             risk_score: 80,
-            factors: vec!["FATF Greylist".to_string(), "Targeted Sanctions".to_string()],
+            factors: vec![
+                "FATF Greylist".to_string(),
+                "Targeted Sanctions".to_string(),
+            ],
             fatf_status: Some("Greylist".to_string()),
             sanctions_programs: vec![],
         });
@@ -154,7 +157,10 @@ impl GeographicRiskScorer {
             country_name: "Yemen".to_string(),
             risk_level: CountryRiskLevel::High,
             risk_score: 75,
-            factors: vec!["Conflict Zone".to_string(), "Targeted Sanctions".to_string()],
+            factors: vec![
+                "Conflict Zone".to_string(),
+                "Targeted Sanctions".to_string(),
+            ],
             fatf_status: None,
             sanctions_programs: vec![],
         });
@@ -243,7 +249,8 @@ impl GeographicRiskScorer {
 
     /// Add a jurisdiction risk entry
     pub fn add_jurisdiction_risk(&mut self, risk: JurisdictionRisk) {
-        self.jurisdiction_risks.insert(risk.jurisdiction.clone(), risk);
+        self.jurisdiction_risks
+            .insert(risk.jurisdiction.clone(), risk);
     }
 
     /// Get country risk by ISO code
@@ -257,7 +264,11 @@ impl GeographicRiskScorer {
     }
 
     /// Calculate transaction risk based on origin and destination countries
-    pub fn calculate_transaction_risk(&self, origin: &str, destination: &str) -> TransactionGeographicRisk {
+    pub fn calculate_transaction_risk(
+        &self,
+        origin: &str,
+        destination: &str,
+    ) -> TransactionGeographicRisk {
         let origin_risk = self.get_country_risk(origin);
         let dest_risk = self.get_country_risk(destination);
 
@@ -267,11 +278,11 @@ impl GeographicRiskScorer {
         // Use the higher of the two risks, weighted
         let combined_score = ((origin_score as u16 * 40 + dest_score as u16 * 60) / 100) as u8;
 
-        let is_prohibited = origin_risk.map_or(false, |r| r.is_prohibited())
-            || dest_risk.map_or(false, |r| r.is_prohibited());
+        let is_prohibited = origin_risk.is_some_and(|r| r.is_prohibited())
+            || dest_risk.is_some_and(|r| r.is_prohibited());
 
-        let requires_edd = origin_risk.map_or(false, |r| r.requires_edd())
-            || dest_risk.map_or(false, |r| r.requires_edd());
+        let requires_edd = origin_risk.is_some_and(|r| r.requires_edd())
+            || dest_risk.is_some_and(|r| r.requires_edd());
 
         let risk_level = if is_prohibited {
             CountryRiskLevel::Prohibited

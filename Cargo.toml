@@ -34,14 +34,3 @@ tempfile = "3.8"
 name = "validate_transactions"
 path = "examples/validate_transactions.rs"
 
-[[example]]
-name = "batch_validation"
-path = "examples/batch_validation.rs"
-
-[[example]]
-name = "compliance_report"
-path = "examples/compliance_report.rs"
-
-[[bench]]
-name = "validator_benchmark"
-harness = false
